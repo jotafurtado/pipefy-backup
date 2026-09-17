@@ -158,6 +158,16 @@ class BackupCardJob implements ShouldQueue
             return;
         }
 
+        $legacyPath = "pipefy-backup/{$this->pipeId}/attachments/{$cardId}/{$filename}";
+
+        if (Storage::disk('local')->exists($legacyPath)) {
+            $legacyFull = Storage::disk('local')->path($legacyPath);
+            rename($legacyFull, $fullPath);
+            $this->persistContentLength($attachment, $contentLength);
+
+            return;
+        }
+
         $response = Http::withOptions(['sink' => $fullPath])->get($attachment['url']);
 
         if ($response->failed()) {
