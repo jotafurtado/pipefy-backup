@@ -81,11 +81,23 @@ class BackupCardJob implements ShouldQueue
             return;
         }
 
+        // Detectar filenames duplicados: para esses cards, a migração do
+        // path legado é insegura (não é possível mapear o arquivo legado ao
+        // UUID correto do upload), então forçamos download fresco.
+        $forceDownload = false;
+        $filenames = array_map(
+            fn ($a) => $a['filename'] ?? basename($a['path'] ?? ''),
+            $attachments,
+        );
+        if (count($filenames) !== count(array_unique($filenames))) {
+            $forceDownload = true;
+        }
+
         // Baixar attachments
         $attachmentsDownloaded = 0;
         foreach ($attachments as $attachment) {
             try {
-                $this->downloadAttachment($attachment, $this->cardId);
+                $this->downloadAttachment($attachment, $this->cardId, $forceDownload);
                 $attachmentsDownloaded++;
             } catch (\Throwable $e) {
                 $hasErrors = true;
@@ -134,7 +146,7 @@ class BackupCardJob implements ShouldQueue
         ]);
     }
 
-    private function downloadAttachment(array $attachment, int $cardId): void
+    private function downloadAttachment(array $attachment, int $cardId, bool $forceDownload = false): void
     {
         $filename = BackupPaths::attachmentFilename($attachment);
         $pathUuid = BackupPaths::attachmentPathUuid($attachment);
@@ -160,7 +172,7 @@ class BackupCardJob implements ShouldQueue
 
         $legacyPath = "pipefy-backup/{$this->pipeId}/attachments/{$cardId}/{$filename}";
 
-        if (Storage::disk('local')->exists($legacyPath)) {
+        if (! $forceDownload && Storage::disk('local')->exists($legacyPath)) {
             $legacyFull = Storage::disk('local')->path($legacyPath);
             rename($legacyFull, $fullPath);
             $this->persistContentLength($attachment, $contentLength);
