@@ -1,9 +1,19 @@
 {
     "agents": [
-        "kiro"
+        "cursor",
+        "codex",
+        "claude_code"
     ],
-    "herd_mcp": false,
+    "cloud": true,
+    "guidelines": true,
     "mcp": true,
-    "nightwatch_mcp": false,
-    "sail": false
+    "nightwatch": false,
+    "sail": false,
+    "skills": [
+        "infer-conventions",
+        "deploying-to-cloud",
+        "laravel-best-practices",
+        "testing-best-practices",
+        "tailwindcss-development"
+    ]
 }
