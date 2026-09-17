@@ -1,19 +1,16 @@
 <?php
 
-use App\Jobs\BackupCardJob;
+use App\Backup\BackupPaths;
 use App\Models\PipeBackup;
 use App\Models\PipeBackupCard;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
-
-function callAggregatePipeBackupStatus(int $pipeBackupId): void
-{
-    $job = new BackupCardJob(0, 0, 0);
-    $reflection = new \ReflectionMethod($job, 'aggregatePipeBackupStatus');
-    $reflection->invoke($job, $pipeBackupId);
-}
+uses(RefreshDatabase::class);
 
 test('pipe status is derived correctly from card statuses', function () {
+    Storage::fake('local');
+
     $terminalStatuses = ['completed', 'completed_with_errors', 'failed'];
 
     for ($i = 0; $i < 100; $i++) {
@@ -29,6 +26,7 @@ test('pipe status is derived correctly from card statuses', function () {
         $expectedErrors = 0;
         $hasFailedCard = false;
         $completedOrPartialCount = 0;
+        $expectedIndexCards = [];
 
         for ($j = 0; $j < $cardCount; $j++) {
             $status = fake()->randomElement($terminalStatuses);
@@ -44,7 +42,7 @@ test('pipe status is derived correctly from card statuses', function () {
             $expectedAttachments += $attachments;
             $expectedErrors += $errors;
 
-            PipeBackupCard::factory()->create([
+            $card = PipeBackupCard::factory()->create([
                 'pipe_backup_id' => $pipeBackup->id,
                 'status' => $status,
                 'attachments_count' => $attachments,
@@ -52,9 +50,16 @@ test('pipe status is derived correctly from card statuses', function () {
                 'started_at' => now()->subMinutes(5),
                 'completed_at' => now(),
             ]);
+
+            if (in_array($status, ['completed', 'completed_with_errors'], true)) {
+                $expectedIndexCards[] = [
+                    'id' => $card->card_id,
+                    'title' => $card->card_title,
+                ];
+            }
         }
 
-        callAggregatePipeBackupStatus($pipeBackup->id);
+        $pipeBackup->recalculateStatus();
         $pipeBackup->refresh();
 
         $expectedStatus = $hasFailedCard ? 'completed_with_errors' : 'completed';
@@ -64,7 +69,35 @@ test('pipe status is derived correctly from card statuses', function () {
         expect($pipeBackup->errors_count)->toEqual($expectedErrors);
         expect($pipeBackup->completed_at)->not->toBeNull();
 
+        Storage::disk('local')->assertExists(BackupPaths::index($pipeBackup->pipe_id));
+
+        $index = json_decode(Storage::disk('local')->get(BackupPaths::index($pipeBackup->pipe_id)), true);
+        expect($index['pipe_id'])->toEqual($pipeBackup->pipe_id);
+        expect($index['total_cards'])->toEqual($completedOrPartialCount);
+        expect($index['total_attachments_downloaded'])->toEqual($expectedAttachments);
+        expect($index['errors_count'])->toEqual($expectedErrors);
+        expect($index['cards'])->toEqualCanonicalizing($expectedIndexCards);
+
         PipeBackupCard::query()->delete();
         PipeBackup::query()->delete();
     }
+});
+
+test('pipe status stays processing while cards are pending', function () {
+    Storage::fake('local');
+
+    $pipeBackup = PipeBackup::factory()->create([
+        'status' => 'processing',
+        'completed_at' => null,
+    ]);
+
+    PipeBackupCard::factory()->completed()->create(['pipe_backup_id' => $pipeBackup->id]);
+    PipeBackupCard::factory()->pending()->create(['pipe_backup_id' => $pipeBackup->id]);
+
+    $pipeBackup->recalculateStatus();
+    $pipeBackup->refresh();
+
+    expect($pipeBackup->status)->toEqual('processing');
+    expect($pipeBackup->completed_at)->toBeNull();
+    Storage::disk('local')->assertMissing(BackupPaths::index($pipeBackup->pipe_id));
 });

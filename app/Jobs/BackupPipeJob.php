@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Backup\BackupPaths;
 use App\Models\PipeBackup;
 use App\Models\PipeBackupCard;
 use App\Services\PipefyService;
@@ -50,7 +51,7 @@ class BackupPipeJob implements ShouldQueue
 
                 // Salvar card JSON em disco imediatamente para liberar memória
                 Storage::disk('local')->put(
-                    "pipefy-backup/{$this->pipeId}/cards/{$cardId}.json",
+                    BackupPaths::cardJson($this->pipeId, $cardId),
                     json_encode($card, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
                 );
 

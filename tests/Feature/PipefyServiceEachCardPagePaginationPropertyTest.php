@@ -4,7 +4,7 @@ use App\Services\PipefyService;
 use Illuminate\Support\Facades\Http;
 use Tests\Helpers\PaginationHelper;
 
-test('pagination aggregation returns exactly n cards for any count', function () {
+test('pagination traversal returns exactly n cards for any count', function () {
     for ($i = 0; $i < 100; $i++) {
         PaginationHelper::resetHttpFake();
 
@@ -38,8 +38,18 @@ test('pagination aggregation returns exactly n cards for any count', function ()
             endpoint: 'https://api.pipefy.com/graphql',
         );
 
-        $result = $service->getCards(pipeId: 12345);
+        $allCards = [];
 
-        expect($result)->toHaveCount($totalCards);
+        $total = $service->eachCardPage(
+            pipeId: 12345,
+            onPage: function (array $pageCards, int $accumulatedTotal) use (&$allCards): void {
+                array_push($allCards, ...$pageCards);
+
+                expect($accumulatedTotal)->toBe(count($allCards));
+            },
+        );
+
+        expect($total)->toBe($totalCards);
+        expect($allCards)->toHaveCount($totalCards);
     }
 });

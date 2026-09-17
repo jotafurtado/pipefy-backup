@@ -1,19 +1,19 @@
 <?php
 
-use App\Jobs\VerifyCardBackupJob;
+use App\Backup\VerifyCardBackup;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 test('verify fails when card json is missing', function () {
     Storage::fake('local');
 
-    $job = new VerifyCardBackupJob(12345, 99999, 'Card Ausente');
-    $result = $job->handle();
+    $result = app(VerifyCardBackup::class)->verify(12345, 99999, 'Card Ausente');
 
-    expect($result['ok'])->toBeFalse();
-    expect($result['issues'])->toHaveCount(1);
-    expect($result['issues'][0])->toContain('JSON ausente');
+    expect($result->ok)->toBeFalse();
+    expect($result->issues)->toHaveCount(1);
+    expect($result->issues[0])->toContain('JSON ausente');
 });
 
 test('verify fails when card json is invalid', function () {
@@ -21,12 +21,11 @@ test('verify fails when card json is invalid', function () {
 
     Storage::disk('local')->put('pipefy-backup/12345/cards/99999.json', '{invalid json!!!');
 
-    $job = new VerifyCardBackupJob(12345, 99999, 'Card Inválido');
-    $result = $job->handle();
+    $result = app(VerifyCardBackup::class)->verify(12345, 99999, 'Card Inválido');
 
-    expect($result['ok'])->toBeFalse();
-    expect($result['issues'])->toHaveCount(1);
-    expect($result['issues'][0])->toContain('JSON inválido');
+    expect($result->ok)->toBeFalse();
+    expect($result->issues)->toHaveCount(1);
+    expect($result->issues[0])->toContain('JSON inválido');
 });
 
 test('verify fails when card json is empty object', function () {
@@ -34,11 +33,10 @@ test('verify fails when card json is empty object', function () {
 
     Storage::disk('local')->put('pipefy-backup/12345/cards/99999.json', '{}');
 
-    $job = new VerifyCardBackupJob(12345, 99999, 'Card Vazio');
-    $result = $job->handle();
+    $result = app(VerifyCardBackup::class)->verify(12345, 99999, 'Card Vazio');
 
-    expect($result['ok'])->toBeFalse();
-    expect($result['issues'][0])->toContain('JSON inválido');
+    expect($result->ok)->toBeFalse();
+    expect($result->issues[0])->toContain('JSON inválido');
 });
 
 test('verify fails when attachment is missing', function () {
@@ -57,13 +55,12 @@ test('verify fails when attachment is missing', function () {
         json_encode($cardData),
     );
 
-    $job = new VerifyCardBackupJob(12345, 99999, 'Card com Attachment');
-    $result = $job->handle();
+    $result = app(VerifyCardBackup::class)->verify(12345, 99999, 'Card com Attachment');
 
-    expect($result['ok'])->toBeFalse();
-    expect($result['issues'])->toHaveCount(1);
-    expect($result['issues'][0])->toContain('Attachment ausente');
-    expect($result['issues'][0])->toContain('doc.pdf');
+    expect($result->ok)->toBeFalse();
+    expect($result->issues)->toHaveCount(1);
+    expect($result->issues[0])->toContain('Attachment ausente');
+    expect($result->issues[0])->toContain('doc.pdf');
 });
 
 test('command fails when index json is missing', function () {

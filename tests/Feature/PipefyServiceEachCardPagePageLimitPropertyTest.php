@@ -41,13 +41,16 @@ test('all graphql requests contain first with value 50', function () {
             endpoint: 'https://api.pipefy.com/graphql',
         );
 
-        $service->getCards(pipeId: fake()->numberBetween(1, 99999));
+        $service->eachCardPage(
+            pipeId: fake()->numberBetween(1, 99999),
+            onPage: fn () => null,
+        );
 
         $expectedPages = max(1, (int) ceil($totalCards / 50));
 
         expect($capturedRequests)->toHaveCount($expectedPages);
 
-        foreach ($capturedRequests as $reqIndex => $request) {
+        foreach ($capturedRequests as $request) {
             $body = json_decode($request->body(), true);
             $variables = $body['variables'] ?? [];
 

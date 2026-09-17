@@ -1,12 +1,15 @@
 <?php
 
-use App\Jobs\VerifyCardBackupJob;
+use App\Backup\VerifyCardBackup;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 test('verification detects json and attachments correctly', function () {
     Storage::fake('local');
+
+    $verifier = app(VerifyCardBackup::class);
 
     for ($i = 0; $i < 100; $i++) {
         $pipeId = fake()->numberBetween(100000, 9999999);
@@ -36,11 +39,10 @@ test('verification detects json and attachments correctly', function () {
         ];
 
         if ($scenario === 'missing_json') {
-            $job = new VerifyCardBackupJob($pipeId, $cardId, $cardTitle);
-            $result = $job->handle();
+            $result = $verifier->verify($pipeId, $cardId, $cardTitle);
 
-            expect($result['ok'])->toBeFalse();
-            expect($result['issues'])->not->toBeEmpty();
+            expect($result->ok)->toBeFalse();
+            expect($result->issues)->not->toBeEmpty();
 
             continue;
         }
@@ -51,11 +53,10 @@ test('verification detects json and attachments correctly', function () {
                 'not-valid-json{{{',
             );
 
-            $job = new VerifyCardBackupJob($pipeId, $cardId, $cardTitle);
-            $result = $job->handle();
+            $result = $verifier->verify($pipeId, $cardId, $cardTitle);
 
-            expect($result['ok'])->toBeFalse();
-            expect($result['issues'])->not->toBeEmpty();
+            expect($result->ok)->toBeFalse();
+            expect($result->issues)->not->toBeEmpty();
 
             continue;
         }
@@ -73,11 +74,10 @@ test('verification detects json and attachments correctly', function () {
                 );
             }
 
-            $job = new VerifyCardBackupJob($pipeId, $cardId, $cardTitle);
-            $result = $job->handle();
+            $result = $verifier->verify($pipeId, $cardId, $cardTitle);
 
-            expect($result['ok'])->toBeTrue();
-            expect($result['issues'])->toBeEmpty();
+            expect($result->ok)->toBeTrue();
+            expect($result->issues)->toBeEmpty();
         } else {
             if (count($attachments) > 0) {
                 $skipIndex = fake()->numberBetween(0, count($attachments) - 1);
@@ -92,16 +92,14 @@ test('verification detects json and attachments correctly', function () {
                     );
                 }
 
-                $job = new VerifyCardBackupJob($pipeId, $cardId, $cardTitle);
-                $result = $job->handle();
+                $result = $verifier->verify($pipeId, $cardId, $cardTitle);
 
-                expect($result['ok'])->toBeFalse();
-                expect($result['issues'])->not->toBeEmpty();
+                expect($result->ok)->toBeFalse();
+                expect($result->issues)->not->toBeEmpty();
             } else {
-                $job = new VerifyCardBackupJob($pipeId, $cardId, $cardTitle);
-                $result = $job->handle();
+                $result = $verifier->verify($pipeId, $cardId, $cardTitle);
 
-                expect($result['ok'])->toBeTrue();
+                expect($result->ok)->toBeTrue();
             }
         }
     }

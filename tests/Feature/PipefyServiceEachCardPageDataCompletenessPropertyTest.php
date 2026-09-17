@@ -5,7 +5,7 @@ use Illuminate\Support\Facades\Http;
 use Tests\Helpers\CardGenerator;
 use Tests\Helpers\PaginationHelper;
 
-test('get cards preserves all card fields with equivalent values', function () {
+test('each card page preserves all card fields with equivalent values', function () {
     $expectedFields = [
         'id', 'title', 'assignees', 'comments', 'comments_count',
         'current_phase', 'done', 'due_date', 'fields', 'labels',
@@ -50,11 +50,19 @@ test('get cards preserves all card fields with equivalent values', function () {
             endpoint: 'https://api.pipefy.com/graphql',
         );
 
-        $result = $service->getCards(pipeId: 12345);
+        $allCards = [];
 
-        expect($result)->toHaveCount($cardCount);
+        $total = $service->eachCardPage(
+            pipeId: 12345,
+            onPage: function (array $pageCards) use (&$allCards): void {
+                array_push($allCards, ...$pageCards);
+            },
+        );
 
-        foreach ($result as $cardIndex => $returnedCard) {
+        expect($total)->toBe($cardCount);
+        expect($allCards)->toHaveCount($cardCount);
+
+        foreach ($allCards as $cardIndex => $returnedCard) {
             $originalCard = $generatedCards[$cardIndex];
 
             foreach ($expectedFields as $field) {

@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\BackupCardJob;
+use App\Backup\RetryFailedCards;
 use App\Jobs\BackupPipeJob;
 use App\Models\PipeBackup;
 use App\Services\PipefyService;
@@ -15,10 +15,10 @@ class PipefyBackupAllCommand extends Command
 
     protected $description = 'Faz backup de todos os pipes da organização no Pipefy';
 
-    public function handle(PipefyService $pipefy): int
+    public function handle(PipefyService $pipefy, RetryFailedCards $retryFailedCards): int
     {
         if ($this->option('retry')) {
-            return $this->handleRetry();
+            return $this->handleRetry($retryFailedCards);
         }
 
         $organizationId = config('services.pipefy.organization_id');
@@ -75,7 +75,7 @@ class PipefyBackupAllCommand extends Command
         return self::SUCCESS;
     }
 
-    private function handleRetry(): int
+    private function handleRetry(RetryFailedCards $retryFailedCards): int
     {
         $batchId = PipeBackup::latest()->value('batch_id');
 
@@ -85,46 +85,21 @@ class PipefyBackupAllCommand extends Command
             return self::SUCCESS;
         }
 
-        $backupsWithFailedCards = PipeBackup::where('batch_id', $batchId)
-            ->whereHas('backupCards', fn ($q) => $q->where('status', 'failed'))
-            ->get();
+        $report = $retryFailedCards->retry($batchId);
 
-        if ($backupsWithFailedCards->isEmpty()) {
+        if ($report->isEmpty()) {
             $this->info('Nenhum card com falha para reprocessar.');
 
             return self::SUCCESS;
         }
 
-        $totalRetried = 0;
-        $rows = [];
-
-        foreach ($backupsWithFailedCards as $backup) {
-            $failedCards = $backup->backupCards()->where('status', 'failed')->get();
-
-            foreach ($failedCards as $card) {
-                $card->update([
-                    'status' => 'pending',
-                    'error_message' => null,
-                    'errors_count' => 0,
-                    'started_at' => null,
-                    'completed_at' => null,
-                ]);
-
-                BackupCardJob::dispatch(
-                    $card->id,
-                    $backup->pipe_id,
-                    $card->card_id,
-                );
-
-                $rows[] = [$backup->pipe_id, $backup->pipe_name, $card->card_id, $card->card_title];
-                $totalRetried++;
-            }
-
-            $backup->update(['status' => 'processing']);
-        }
+        $rows = array_map(
+            fn ($item) => [$item->pipeId, $item->pipeName, $item->cardId, $item->cardTitle],
+            $report->items,
+        );
 
         $this->table(['Pipe ID', 'Pipe', 'Card ID', 'Card'], $rows);
-        $this->info("Total de cards redespachados: {$totalRetried}");
+        $this->info("Total de cards redespachados: {$report->count}");
 
         return self::SUCCESS;
     }

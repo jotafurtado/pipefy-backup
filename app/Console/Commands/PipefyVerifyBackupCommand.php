@@ -2,7 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\VerifyCardBackupJob;
+use App\Backup\BackupPaths;
+use App\Backup\VerifyCardBackup;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 
@@ -73,7 +74,7 @@ class PipefyVerifyBackupCommand extends Command
 
     private function verifyPipe(int $pipeId): int
     {
-        $indexPath = "pipefy-backup/{$pipeId}/cards/index.json";
+        $indexPath = BackupPaths::index($pipeId);
 
         if (! Storage::disk('local')->exists($indexPath)) {
             $this->error("Arquivo index.json não encontrado para o pipe {$pipeId}.");
@@ -107,14 +108,13 @@ class PipefyVerifyBackupCommand extends Command
             $cardId = (int) ($card['id'] ?? 0);
             $cardTitle = $card['title'] ?? '';
 
-            $job = new VerifyCardBackupJob($pipeId, $cardId, $cardTitle);
-            $result = $job->handle();
+            $result = app(VerifyCardBackup::class)->verify($pipeId, $cardId, $cardTitle);
 
-            if ($result['ok']) {
+            if ($result->ok) {
                 $cardsOk++;
             } else {
                 $cardsWithIssues++;
-                $allIssues = array_merge($allIssues, $result['issues']);
+                $allIssues = array_merge($allIssues, $result->issues);
             }
         }
 

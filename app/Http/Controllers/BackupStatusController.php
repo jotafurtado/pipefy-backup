@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Jobs\BackupCardJob;
+use App\Backup\RetryFailedCards;
 use App\Jobs\BackupPipeJob;
 use App\Models\PipeBackup;
 use Illuminate\Http\JsonResponse;
@@ -55,7 +55,7 @@ class BackupStatusController extends Controller
         ]);
     }
 
-    public function retry(): JsonResponse
+    public function retry(RetryFailedCards $retryFailedCards): JsonResponse
     {
         $batchId = PipeBackup::latest()->value('batch_id');
 
@@ -87,35 +87,8 @@ class BackupStatusController extends Controller
             $totalRetried++;
         }
 
-        // Retry individual cards that failed
-        $backupsWithFailedCards = PipeBackup::where('batch_id', $batchId)
-            ->where('status', '!=', 'failed')
-            ->whereHas('backupCards', fn ($q) => $q->where('status', 'failed'))
-            ->get();
-
-        foreach ($backupsWithFailedCards as $backup) {
-            $failedCards = $backup->backupCards()->where('status', 'failed')->get();
-
-            foreach ($failedCards as $card) {
-                $card->update([
-                    'status' => 'pending',
-                    'error_message' => null,
-                    'errors_count' => 0,
-                    'started_at' => null,
-                    'completed_at' => null,
-                ]);
-
-                BackupCardJob::dispatch(
-                    $card->id,
-                    $backup->pipe_id,
-                    $card->card_id,
-                );
-
-                $totalRetried++;
-            }
-
-            $backup->update(['status' => 'processing']);
-        }
+        $cardReport = $retryFailedCards->retry($batchId);
+        $totalRetried += $cardReport->count;
 
         if ($totalRetried === 0) {
             return response()->json(['message' => 'Nenhum item com falha para reprocessar.']);

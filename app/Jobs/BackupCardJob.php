@@ -2,14 +2,13 @@
 
 namespace App\Jobs;
 
-use App\Models\PipeBackup;
+use App\Backup\BackupPaths;
 use App\Models\PipeBackupCard;
 use App\Models\PipeBackupError;
 use App\Services\PipefyService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class BackupCardJob implements ShouldQueue
@@ -38,7 +37,7 @@ class BackupCardJob implements ShouldQueue
         $hasErrors = false;
 
         // Ler card data do disco (salvo pelo BackupPipeJob)
-        $cardJsonPath = "pipefy-backup/{$this->pipeId}/cards/{$this->cardId}.json";
+        $cardJsonPath = BackupPaths::cardJson($this->pipeId, $this->cardId);
         $cardJson = Storage::disk('local')->get($cardJsonPath);
 
         if (! $cardJson) {
@@ -47,7 +46,7 @@ class BackupCardJob implements ShouldQueue
                 'error_message' => "Card JSON não encontrado: {$cardJsonPath}",
                 'completed_at' => now(),
             ]);
-            $this->aggregatePipeBackupStatus($backupCard->pipe_backup_id);
+            $this->notifyCardCompletion($backupCard);
 
             return;
         }
@@ -77,7 +76,7 @@ class BackupCardJob implements ShouldQueue
                 'error_message' => $e->getMessage(),
                 'completed_at' => now(),
             ]);
-            $this->aggregatePipeBackupStatus($backupCard->pipe_backup_id);
+            $this->notifyCardCompletion($backupCard);
 
             return;
         }
@@ -101,7 +100,7 @@ class BackupCardJob implements ShouldQueue
             'completed_at' => now(),
         ]);
 
-        $this->aggregatePipeBackupStatus($backupCard->pipe_backup_id);
+        $this->notifyCardCompletion($backupCard);
     }
 
     public function failed(\Throwable $exception): void
@@ -114,8 +113,13 @@ class BackupCardJob implements ShouldQueue
                 'error_message' => $exception->getMessage(),
                 'completed_at' => now(),
             ]);
-            $this->aggregatePipeBackupStatus($backupCard->pipe_backup_id);
+            $this->notifyCardCompletion($backupCard);
         }
+    }
+
+    private function notifyCardCompletion(PipeBackupCard $backupCard): void
+    {
+        $backupCard->pipeBackup->recalculateStatus();
     }
 
     private function recordError(PipeBackupCard $backupCard, string $type, int $cardId, ?string $filename, string $message): void
@@ -132,9 +136,8 @@ class BackupCardJob implements ShouldQueue
 
     private function downloadAttachment(array $attachment, int $cardId): void
     {
-        $filename = $attachment['filename'] ?? basename($attachment['path'] ?? '') ?: 'unknown';
-        $attachmentDir = "pipefy-backup/{$this->pipeId}/attachments/{$cardId}";
-        $storagePath = "{$attachmentDir}/{$filename}";
+        $filename = BackupPaths::attachmentFilename($attachment);
+        $storagePath = BackupPaths::attachment($this->pipeId, $cardId, $filename);
         $fullPath = Storage::disk('local')->path($storagePath);
         $directory = dirname($fullPath);
 
@@ -146,62 +149,6 @@ class BackupCardJob implements ShouldQueue
 
         if ($response->failed()) {
             throw new \RuntimeException("Download falhou: HTTP {$response->status()}");
-        }
-    }
-
-    private function aggregatePipeBackupStatus(int $pipeBackupId): void
-    {
-        $pipeBackup = PipeBackup::findOrFail($pipeBackupId);
-        $cards = $pipeBackup->backupCards();
-
-        $pipeBackup->update([
-            'cards_count' => (clone $cards)->whereIn('status', ['completed', 'completed_with_errors'])->count(),
-            'attachments_count' => (clone $cards)->sum('attachments_count'),
-            'errors_count' => (clone $cards)->sum('errors_count'),
-        ]);
-
-        $pendingOrProcessing = (clone $cards)->whereIn('status', ['pending', 'processing'])->count();
-
-        if ($pendingOrProcessing === 0) {
-            $hasFailed = (clone $cards)->where('status', 'failed')->exists();
-            $pipeBackup->update([
-                'status' => $hasFailed ? 'completed_with_errors' : 'completed',
-                'completed_at' => now(),
-            ]);
-
-            $this->generateIndexJson($pipeBackup);
-        }
-    }
-
-    private function generateIndexJson(PipeBackup $pipeBackup): void
-    {
-        try {
-            $cards = $pipeBackup->backupCards()
-                ->whereIn('status', ['completed', 'completed_with_errors'])
-                ->get(['card_id', 'card_title']);
-
-            $indexCards = $cards->map(fn (PipeBackupCard $card) => [
-                'id' => $card->card_id,
-                'title' => $card->card_title,
-            ])->values()->toArray();
-
-            $index = [
-                'pipe_id' => $pipeBackup->pipe_id,
-                'backup_date' => now()->toIso8601String(),
-                'total_cards' => $pipeBackup->cards_count,
-                'total_attachments_downloaded' => $pipeBackup->attachments_count,
-                'errors_count' => $pipeBackup->errors_count,
-                'cards' => $indexCards,
-            ];
-
-            Storage::disk('local')->put(
-                "pipefy-backup/{$pipeBackup->pipe_id}/cards/index.json",
-                json_encode($index, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
-            );
-
-            Log::info("index.json gerado para pipe {$pipeBackup->pipe_id} com ".count($indexCards).' cards.');
-        } catch (\Throwable $e) {
-            Log::warning("Falha ao gerar index.json para pipe {$pipeBackup->pipe_id}: {$e->getMessage()}");
         }
     }
 }

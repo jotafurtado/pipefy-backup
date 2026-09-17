@@ -2,6 +2,7 @@
 
 use App\Exceptions\PipefyApiException;
 use App\Services\PipefyService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 
 function makeService(): PipefyService
@@ -19,7 +20,7 @@ function fakeOauthToken(): void
     cache()->forget('pipefy_access_token');
 }
 
-test('get cards returns empty array for pipe with zero cards', function () {
+test('each card page returns zero total for pipe with zero cards', function () {
     fakeOauthToken();
 
     Http::fake(function ($request) {
@@ -40,9 +41,18 @@ test('get cards returns empty array for pipe with zero cards', function () {
         ]);
     });
 
-    $result = makeService()->getCards(pipeId: 99999);
+    $pages = [];
 
-    expect($result)->toBeArray()->toBeEmpty();
+    $total = makeService()->eachCardPage(
+        pipeId: 99999,
+        onPage: function (array $pageCards) use (&$pages): void {
+            $pages[] = $pageCards;
+        },
+    );
+
+    expect($total)->toBe(0);
+    expect($pages)->toHaveCount(1);
+    expect($pages[0])->toBeEmpty();
 });
 
 test('get card attachments returns empty array for card with zero attachments', function () {
@@ -67,7 +77,7 @@ test('get card attachments returns empty array for card with zero attachments', 
     expect($result)->toBeArray()->toBeEmpty();
 });
 
-test('get cards throws pipefy api exception on connection error', function () {
+test('each card page throws pipefy api exception on connection error', function () {
     fakeOauthToken();
 
     Http::fake(function ($request) {
@@ -75,10 +85,13 @@ test('get cards throws pipefy api exception on connection error', function () {
             return Http::response(['access_token' => 'fake-token', 'expires_in' => 3600]);
         }
 
-        throw new \Illuminate\Http\Client\ConnectionException('Connection timed out');
+        throw new ConnectionException('Connection timed out');
     });
 
-    makeService()->getCards(pipeId: 12345);
+    makeService()->eachCardPage(
+        pipeId: 12345,
+        onPage: fn () => null,
+    );
 })->throws(PipefyApiException::class, 'Falha ao conectar com a API do Pipefy');
 
 test('get card attachments throws pipefy api exception on connection error', function () {
@@ -89,7 +102,7 @@ test('get card attachments throws pipefy api exception on connection error', fun
             return Http::response(['access_token' => 'fake-token', 'expires_in' => 3600]);
         }
 
-        throw new \Illuminate\Http\Client\ConnectionException('Connection refused');
+        throw new ConnectionException('Connection refused');
     });
 
     makeService()->getCardAttachments(cardId: 12345);

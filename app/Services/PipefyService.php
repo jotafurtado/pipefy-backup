@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Backup\BackupPaths;
 use App\Exceptions\PipefyApiException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
@@ -30,7 +32,7 @@ class PipefyService
                     'client_id' => $this->clientId,
                     'client_secret' => $this->clientSecret,
                 ]);
-            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            } catch (ConnectionException $e) {
                 throw PipefyApiException::connectionError($e->getMessage());
             }
 
@@ -71,7 +73,7 @@ class PipefyService
                 ->acceptJson()
                 ->timeout(120)
                 ->post($this->endpoint, $payload);
-        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+        } catch (ConnectionException $e) {
             throw PipefyApiException::connectionError($e->getMessage());
         }
 
@@ -127,100 +129,6 @@ class PipefyService
     }
 
     /**
-     * Retorna todos os cards de um pipe, com paginação automática.
-     *
-     * @return array<int, array<string, mixed>>
-     *
-     * @throws PipefyApiException
-     */
-    /**
-     * Retorna todos os cards de um pipe, com paginação automática.
-     *
-     * @param  (\Closure(int): void)|null  $onPageFetched  Callback chamado após cada página com o total acumulado de cards
-     * @return array<int, array<string, mixed>>
-     *
-     * @throws PipefyApiException
-     */
-    public function getCards(int $pipeId, ?\Closure $onPageFetched = null): array
-    {
-        $graphql = <<<'GRAPHQL'
-        query ($pipeId: ID!, $first: Int!, $after: String) {
-            allCards(pipeId: $pipeId, first: $first, after: $after) {
-                pageInfo {
-                    hasNextPage
-                    endCursor
-                }
-                edges {
-                    node {
-                        id
-                        title
-                        assignees {
-                            id
-                            name
-                        }
-                        comments {
-                            text
-                        }
-                        comments_count
-                        current_phase {
-                            name
-                        }
-                        done
-                        due_date
-                        fields {
-                            name
-                            value
-                        }
-                        labels {
-                            name
-                        }
-                        phases_history {
-                            phase {
-                                name
-                            }
-                            firstTimeIn
-                            lastTimeOut
-                        }
-                        url
-                    }
-                }
-            }
-        }
-        GRAPHQL;
-
-        $cards = [];
-        $cursor = null;
-
-        do {
-            $variables = [
-                'pipeId' => $pipeId,
-                'first' => 50,
-            ];
-
-            if ($cursor !== null) {
-                $variables['after'] = $cursor;
-            }
-
-            $data = $this->query($graphql, $variables);
-
-            $allCards = $data['allCards'];
-
-            foreach ($allCards['edges'] as $edge) {
-                $cards[] = $edge['node'];
-            }
-
-            if ($onPageFetched) {
-                $onPageFetched(count($cards));
-            }
-
-            $pageInfo = $allCards['pageInfo'];
-            $cursor = $pageInfo['endCursor'];
-        } while ($pageInfo['hasNextPage']);
-
-        return $cards;
-    }
-
-    /**
      * Itera sobre os cards de um pipe página por página, sem acumular em memória.
      *
      * @param  \Closure(array<int, array<string, mixed>>, int): void  $onPage  Callback recebe (cards da página, total acumulado)
@@ -230,7 +138,55 @@ class PipefyService
      */
     public function eachCardPage(int $pipeId, \Closure $onPage): int
     {
-        $graphql = <<<'GRAPHQL'
+        $total = 0;
+
+        $this->paginateCardPages($pipeId, function (array $pageCards) use ($onPage, &$total): void {
+            $total += count($pageCards);
+
+            $onPage($pageCards, $total);
+        });
+
+        return $total;
+    }
+
+    /**
+     * @param  \Closure(array<int, array<string, mixed>>): void  $onPage
+     *
+     * @throws PipefyApiException
+     */
+    private function paginateCardPages(int $pipeId, \Closure $onPage): void
+    {
+        $cursor = null;
+
+        do {
+            $variables = [
+                'pipeId' => $pipeId,
+                'first' => 50,
+            ];
+
+            if ($cursor !== null) {
+                $variables['after'] = $cursor;
+            }
+
+            $data = $this->query($this->cardsGraphql(), $variables);
+
+            $allCards = $data['allCards'];
+
+            $pageCards = array_map(
+                fn (array $edge) => $edge['node'],
+                $allCards['edges'],
+            );
+
+            $onPage($pageCards);
+
+            $pageInfo = $allCards['pageInfo'];
+            $cursor = $pageInfo['endCursor'];
+        } while ($pageInfo['hasNextPage']);
+    }
+
+    private function cardsGraphql(): string
+    {
+        return <<<'GRAPHQL'
         query ($pipeId: ID!, $first: Int!, $after: String) {
             allCards(pipeId: $pipeId, first: $first, after: $after) {
                 pageInfo {
@@ -274,38 +230,6 @@ class PipefyService
             }
         }
         GRAPHQL;
-
-        $total = 0;
-        $cursor = null;
-
-        do {
-            $variables = [
-                'pipeId' => $pipeId,
-                'first' => 50,
-            ];
-
-            if ($cursor !== null) {
-                $variables['after'] = $cursor;
-            }
-
-            $data = $this->query($graphql, $variables);
-
-            $allCards = $data['allCards'];
-
-            $pageCards = array_map(
-                fn (array $edge) => $edge['node'],
-                $allCards['edges'],
-            );
-
-            $total += count($pageCards);
-
-            $onPage($pageCards, $total);
-
-            $pageInfo = $allCards['pageInfo'];
-            $cursor = $pageInfo['endCursor'];
-        } while ($pageInfo['hasNextPage']);
-
-        return $total;
     }
 
     /**
@@ -341,7 +265,7 @@ class PipefyService
         $attachments = $data['card']['attachments'] ?? [];
 
         return array_map(function (array $attachment) {
-            $attachment['filename'] = basename($attachment['path'] ?? '') ?: 'unknown';
+            $attachment['filename'] = BackupPaths::attachmentFilename(['path' => $attachment['path'] ?? '']);
 
             return $attachment;
         }, $attachments);
