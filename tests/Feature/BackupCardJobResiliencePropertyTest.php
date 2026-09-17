@@ -5,10 +5,11 @@ use App\Models\PipeBackup;
 use App\Models\PipeBackupCard;
 use App\Models\PipeBackupError;
 use App\Services\PipefyService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 test('attachment failure does not block remaining downloads', function () {
     Storage::fake('local');
@@ -30,7 +31,7 @@ test('attachment failure does not block remaining downloads', function () {
             $attachments[] = [
                 'url' => $url,
                 'createdAt' => fake()->dateTimeThisYear()->format('c'),
-                'path' => '/uploads/'.$filename,
+                'path' => 'uploads/'.fake()->uuid().'/'.$filename,
                 'filename' => $filename,
             ];
 

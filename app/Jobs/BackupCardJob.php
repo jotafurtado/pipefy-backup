@@ -137,7 +137,8 @@ class BackupCardJob implements ShouldQueue
     private function downloadAttachment(array $attachment, int $cardId): void
     {
         $filename = BackupPaths::attachmentFilename($attachment);
-        $storagePath = BackupPaths::attachment($this->pipeId, $cardId, $filename);
+        $pathUuid = BackupPaths::attachmentPathUuid($attachment);
+        $storagePath = BackupPaths::attachment($this->pipeId, $cardId, $filename, $pathUuid);
         $fullPath = Storage::disk('local')->path($storagePath);
         $directory = dirname($fullPath);
 

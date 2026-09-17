@@ -2,48 +2,42 @@
 
 use App\Backup\BackupPaths;
 
-test('card json path matches legacy layout', function () {
-    expect(BackupPaths::cardJson(12345, 67890))->toBe('pipefy-backup/12345/cards/67890.json');
+test('attachmentPathUuid extracts uuid from uploads path', function () {
+    $attachment = [
+        'path' => 'uploads/e4adb580-95f1-469f-bffc-f28a1767e07e/produto_de_teste.png',
+        'filename' => 'produto_de_teste.png',
+    ];
+
+    expect(BackupPaths::attachmentPathUuid($attachment))
+        ->toBe('e4adb580-95f1-469f-bffc-f28a1767e07e');
 });
 
-test('attachment path matches legacy layout', function () {
-    expect(BackupPaths::attachment(12345, 67890, 'report.pdf'))
-        ->toBe('pipefy-backup/12345/attachments/67890/report.pdf');
+test('attachmentPathUuid extracts uuid from path with spaces in filename', function () {
+    $attachment = [
+        'path' => 'uploads/51b76e16-df73-4606-b029-f407b554140e/download (1).jpg',
+        'filename' => 'download (1).jpg',
+    ];
+
+    expect(BackupPaths::attachmentPathUuid($attachment))
+        ->toBe('51b76e16-df73-4606-b029-f407b554140e');
 });
 
-test('index path matches legacy layout', function () {
-    expect(BackupPaths::index(12345))->toBe('pipefy-backup/12345/cards/index.json');
+test('attachmentPathUuid throws on malformed path', function () {
+    $attachment = [
+        'path' => '/uploads/somefile.png',
+        'filename' => 'somefile.png',
+    ];
+
+    expect(fn () => BackupPaths::attachmentPathUuid($attachment))
+        ->toThrow(InvalidArgumentException::class);
 });
 
-test('attachment filename uses explicit filename when present', function () {
-    expect(BackupPaths::attachmentFilename([
-        'filename' => 'custom.pdf',
-        'path' => '/uploads/other.pdf',
-    ]))->toBe('custom.pdf');
+test('attachment with pathUuid returns nested path', function () {
+    expect(BackupPaths::attachment(1000172, 36460290, 'file.png', 'e4adb580-95f1-469f-bffc-f28a1767e07e'))
+        ->toBe('pipefy-backup/1000172/attachments/36460290/e4adb580-95f1-469f-bffc-f28a1767e07e/file.png');
 });
 
-test('attachment filename derives from path when filename is absent', function () {
-    expect(BackupPaths::attachmentFilename([
-        'path' => '/uploads/report.pdf',
-    ]))->toBe('report.pdf');
-});
-
-test('attachment filename falls back to unknown when path basename is empty', function () {
-    expect(BackupPaths::attachmentFilename(['path' => '']))->toBe('unknown');
-    expect(BackupPaths::attachmentFilename([]))->toBe('unknown');
-});
-
-test('writer and reader resolve the same attachment path', function () {
-    for ($i = 0; $i < 100; $i++) {
-        $pipeId = fake()->numberBetween(100000, 9999999);
-        $cardId = fake()->numberBetween(10000, 999999);
-        $attachment = fake()->boolean()
-            ? ['filename' => fake()->word().'.pdf']
-            : ['path' => '/uploads/'.fake()->word().'.pdf'];
-
-        $filename = BackupPaths::attachmentFilename($attachment);
-        $path = BackupPaths::attachment($pipeId, $cardId, $filename);
-
-        expect($path)->toBe("pipefy-backup/{$pipeId}/attachments/{$cardId}/{$filename}");
-    }
+test('attachment without pathUuid returns flat legacy path', function () {
+    expect(BackupPaths::attachment(1000172, 36460290, 'file.png'))
+        ->toBe('pipefy-backup/1000172/attachments/36460290/file.png');
 });

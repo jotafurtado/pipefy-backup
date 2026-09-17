@@ -23,3 +23,11 @@ _Avoid_: anexo, file
 **Verification**:
 Checagem de integridade dos arquivos em disco contra o índice.
 _Avoid_: validation, check
+
+**Attachment Path**:
+Caminho de um attachment no disco: `attachments/{cardId}/{pathUuid}/{filename}`, onde `pathUuid` é o UUID do upload no Pipefy, extraído de `attachment.path`.
+_Avoid_: file path, storage path
+
+**Orphan Attachment**:
+Arquivo diretamente em `attachments/{cardId}/` (não dentro de um subdir de `pathUuid`), resquício do esquema de path legado sem sufixo. Removido pelo `pipefy:cleanup-attachments`.
+_Avoid_: duplicate file, leftover file

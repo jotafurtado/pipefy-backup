@@ -74,7 +74,7 @@ class CardGenerator
                     'filename' => $faker->lexify('????????').'.'.$faker->fileExtension(),
                     'url' => $faker->url(),
                     'createdAt' => $faker->dateTimeThisYear()->format('c'),
-                    'path' => '/uploads/'.$faker->lexify('????????').'.'.$faker->fileExtension(),
+                    'path' => 'uploads/'.$faker->uuid().'/'.$faker->lexify('????????').'.'.$faker->fileExtension(),
                 ];
             }
             $card['attachments'] = $attachments;
