@@ -174,10 +174,12 @@ class BackupCardJob implements ShouldQueue
 
         if (! $forceDownload && Storage::disk('local')->exists($legacyPath)) {
             $legacyFull = Storage::disk('local')->path($legacyPath);
-            rename($legacyFull, $fullPath);
-            $this->persistContentLength($attachment, $contentLength);
 
-            return;
+            if (@rename($legacyFull, $fullPath)) {
+                $this->persistContentLength($attachment, $contentLength);
+
+                return;
+            }
         }
 
         $response = Http::withOptions(['sink' => $fullPath])->get($attachment['url']);
@@ -221,9 +223,12 @@ class BackupCardJob implements ShouldQueue
             }
         }
 
-        Storage::disk('local')->put(
-            $cardJsonPath,
-            json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
-        );
+        $encoded = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+
+        if ($encoded === false) {
+            return;
+        }
+
+        Storage::disk('local')->put($cardJsonPath, $encoded);
     }
 }

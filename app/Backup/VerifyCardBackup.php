@@ -34,7 +34,17 @@ class VerifyCardBackup
 
         foreach ($attachments as $attachment) {
             $filename = BackupPaths::attachmentFilename($attachment);
-            $pathUuid = BackupPaths::attachmentPathUuid($attachment);
+
+            try {
+                $pathUuid = BackupPaths::attachmentPathUuid($attachment);
+            } catch (\InvalidArgumentException $e) {
+                $msg = "Verificação: Path sem UUID - pipe:{$pipeId} card:{$cardId} file:{$filename}";
+                Log::warning($msg);
+                $issues[] = $msg;
+
+                continue;
+            }
+
             $attachmentPath = BackupPaths::attachment($pipeId, $cardId, $filename, $pathUuid);
 
             if (! Storage::disk('local')->exists($attachmentPath)) {

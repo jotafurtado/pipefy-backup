@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
 
 class CleanupAttachmentsCommand extends Command
@@ -57,7 +58,7 @@ class CleanupAttachmentsCommand extends Command
     /**
      * @return list<string>
      */
-    private function findOrphans($disk, string $basePath): array
+    private function findOrphans(Filesystem $disk, string $basePath): array
     {
         $orphans = [];
 
