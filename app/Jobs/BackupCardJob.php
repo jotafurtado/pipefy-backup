@@ -146,10 +146,62 @@ class BackupCardJob implements ShouldQueue
             mkdir($directory, 0755, true);
         }
 
+        $contentLength = (int) Http::head($attachment['url'])->header('Content-Length');
+
+        if ($contentLength > 0
+            && Storage::disk('local')->exists($storagePath)
+            && is_file($fullPath)
+            && filesize($fullPath) === $contentLength
+        ) {
+            $this->persistContentLength($attachment, $contentLength);
+
+            return;
+        }
+
         $response = Http::withOptions(['sink' => $fullPath])->get($attachment['url']);
 
         if ($response->failed()) {
             throw new \RuntimeException("Download falhou: HTTP {$response->status()}");
         }
+
+        $this->persistContentLength($attachment, $contentLength);
+    }
+
+    private function persistContentLength(array $attachment, int $contentLength): void
+    {
+        if ($contentLength <= 0) {
+            return;
+        }
+
+        $cardJsonPath = BackupPaths::cardJson($this->pipeId, $this->cardId);
+        $raw = Storage::disk('local')->get($cardJsonPath);
+
+        if ($raw === null) {
+            return;
+        }
+
+        $data = json_decode($raw, true);
+
+        if (! is_array($data) || ! isset($data['attachments']) || ! is_array($data['attachments'])) {
+            return;
+        }
+
+        $targetPath = $attachment['path'] ?? null;
+
+        if ($targetPath === null) {
+            return;
+        }
+
+        foreach ($data['attachments'] as $i => $entry) {
+            if ((is_array($entry) ? ($entry['path'] ?? null) : null) === $targetPath) {
+                $data['attachments'][$i]['content_length'] = $contentLength;
+                break;
+            }
+        }
+
+        Storage::disk('local')->put(
+            $cardJsonPath,
+            json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+        );
     }
 }
