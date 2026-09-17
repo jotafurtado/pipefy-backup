@@ -11,6 +11,8 @@
 /.phpunit.cache
 /.vscode
 /.zed
+# Local skills link (.cursor/skills -> .agents/skills, junction/symlink)
+.cursor/skills
 /auth.json
 /node_modules
 /public/build
