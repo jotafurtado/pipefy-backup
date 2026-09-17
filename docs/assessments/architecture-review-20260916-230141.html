@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture Review — pipefy-backup</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>
+<style>
+  .badge-strong { background: #166534; color: #fff; }
+  .badge-worth { background: #92400e; color: #fff; }
+  .badge-spec { background: #475569; color: #fff; }
+  .mod { border: 2px solid #334155; border-radius: .5rem; overflow: hidden; }
+  .mod .iface { background: #1e293b; color: #f8fafc; font-family: monospace; font-size: .72rem; padding: .4rem .6rem; }
+  .mod .impl { background: #f1f5f9; color: #334155; font-size: .72rem; padding: .4rem .6rem; }
+  .mod.deep .iface { background: #166534; }
+  .mod.shallow .iface { background: #991b1b; }
+  .arrow { color: #64748b; font-size: 1.25rem; line-height: 1; }
+  code.f { font-family: monospace; font-size: .78rem; background: #f1f5f9; padding: .05rem .35rem; border-radius: .25rem; }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+<div class="max-w-5xl mx-auto px-6 py-10">
+
+  <header class="mb-8">
+    <p class="text-sm uppercase tracking-widest text-slate-500">Architecture review · pipefy-backup · 2026-09-16</p>
+    <h1 class="text-3xl font-bold mt-1">Oportunidades de deepening</h1>
+    <p class="mt-3 text-slate-600 max-w-3xl">
+      Base: 16 arquivos em <code class="f">app/</code>, commit único (sem hot spots no histórico — varredura ampliada),
+      sem <code class="f">CONTEXT.md</code> nem ADRs (nada a re-litigar). Vocabulário de domínio extraído de
+      <code class="f">docs/specs</code>: <em>pipe backup</em>, <em>card backup</em>, <em>attachment</em>, <em>batch</em>, verificação de integridade.
+      Vocabulário de arquitetura: <strong>module</strong>, <strong>interface</strong>, <strong>depth</strong>,
+      <strong>seam</strong>, <strong>adapter</strong>, <strong>leverage</strong>, <strong>locality</strong>.
+    </p>
+  </header>
+
+  <section class="bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="text-xl font-semibold mb-3">Pipeline atual (visão geral)</h2>
+    <pre class="mermaid">
+      flowchart LR
+        A[pipefy:backup-all] --> B[BackupPipeJob]
+        B -->|eachCardPage| C[(Pipefy API)]
+        B --> D[BackupCardJob x N]
+        D -->|getCardAttachments| C
+        D --> E[(disco: cards + attachments)]
+        D --> F[index.json]
+        G[pipefy:verify-backup] --> H[VerifyCardBackupJob]
+        H --> E
+    </pre>
+  </section>
+
+  <!-- CANDIDATO 1 -->
+  <section class="bg-white rounded-xl shadow p-6 mb-6">
+    <div class="flex items-center gap-3 mb-2">
+      <h2 class="text-xl font-semibold">1. Travessia de cards duplicada no PipefyService</h2>
+      <span class="badge-strong text-xs font-bold px-2 py-1 rounded-full">Strong</span>
+    </div>
+    <p class="text-sm text-slate-500 mb-4">Files: <code class="f">app/Services/PipefyService.php</code> (métodos <code class="f">getCards</code> e <code class="f">eachCardPage</code>)</p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Problem</h3>
+        <p class="text-sm">O mesmo documento GraphQL (~45 linhas) e o mesmo loop de paginação existem <strong>duas vezes</strong>, verbatim.
+        <code class="f">getCards</code> ainda ganhou um callback <code class="f">$onPageFetched</code> aparafusado — um parâmetro que existe só para imitar o outro método.
+        O módulo é <strong>shallow</strong>: duas interfaces para um único comportamento. Pior: a superfície de teste (<code class="f">getCards</code>, coberta por 4 property tests)
+        <strong>não é a seam de produção</strong> (<code class="f">eachCardPage</code>, usada pelo <code class="f">BackupPipeJob</code>). Uma mudança de campo na API exige o mesmo edit em dois lugares, e nada garante que ambos mudem juntos.</p>
+      </div>
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Solution</h3>
+        <p class="text-sm">Uma única travessia paginada atrás da seam (ex.: gerador privado <code class="f">paginateCards</code> rendendo páginas).
+        <code class="f">eachCardPage</code> vira a interface pública enxuta; <code class="f">getCards</code> vira um <strong>adapter</strong> fino que acumula — ou deixa de existir, com os tests migrados para a seam real.
+        <strong>Deletion test</strong>: deletar o corpo de um dos loops hoje não concentra complexidade — ela reaparece idêntica no outro. Sinal clássico de módulo shallow.</p>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="mod shallow"><div class="iface">getCards(pipeId, ?onPageFetched) · eachCardPage(pipeId, onPage) + GraphQL ×2</div><div class="impl">2 loops de paginação + 2 queries idênticas — interface quase tão complexa quanto a implementação</div></div>
+      <div class="mod deep"><div class="iface">eachCardPage(pipeId, onPage): int</div><div class="impl">1 travessia + 1 query; getCards vira adapter fino (ou some)</div></div>
+    </div>
+    <div class="text-sm bg-slate-50 rounded p-3"><strong>Benefits.</strong> <em>Locality:</em> mudança de campo da API num só lugar. <em>Leverage:</em> uma implementação serve produção e tests.
+    Tests passam a atravessar a mesma seam que a produção — "the interface is the test surface".</div>
+  </section>
+
+  <!-- CANDIDATO 2 -->
+  <section class="bg-white rounded-xl shadow p-6 mb-6">
+    <div class="flex items-center gap-3 mb-2">
+      <h2 class="text-xl font-semibold">2. Layout de arquivos do backup espalhado em 4 módulos</h2>
+      <span class="badge-strong text-xs font-bold px-2 py-1 rounded-full">Strong</span>
+    </div>
+    <p class="text-sm text-slate-500 mb-4">Files: <code class="f">app/Jobs/BackupPipeJob.php</code> · <code class="f">app/Jobs/BackupCardJob.php</code> · <code class="f">app/Jobs/VerifyCardBackupJob.php</code> · <code class="f">app/Console/Commands/PipefyVerifyBackupCommand.php</code></p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Problem</h3>
+        <p class="text-sm">Os caminhos <code class="f">pipefy-backup/{pipe}/cards/{card}.json</code>, <code class="f">…/attachments/{card}/{file}</code> e
+        <code class="f">…/cards/index.json</code> são interpolados à mão em 4 módulos. O fallback de filename
+        (<code class="f">basename($path) ?: 'unknown'</code>) está copiado em <strong>3</strong> lugares
+        (<code class="f">PipefyService::getCardAttachments</code>, <code class="f">BackupCardJob::downloadAttachment</code>, <code class="f">VerifyCardBackupJob::handle</code>).
+        Zero <em>locality</em>: renomear o layout quebra N callers em silêncio, e writer e reader podem divergir sem que nenhum teste acuse.</p>
+      </div>
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Solution</h3>
+        <p class="text-sm">Um módulo de layout (ex.: <code class="f">BackupPaths</code>) com interface pequena:
+        <code class="f">cardJson(pipeId, cardId)</code>, <code class="f">attachment(pipeId, cardId, filename)</code>,
+        <code class="f">index(pipeId)</code>, <code class="f">filename(attachment)</code>. Writers e readers passam pela mesma seam;
+        o conhecimento do layout vive num lugar só. <strong>One adapter = hypothetical seam</strong> não se aplica aqui — já há 4 adapters reais divergindo.</p>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="mod shallow"><div class="iface">4 módulos interpolando strings + basename ×3</div><div class="impl">conhecimento do layout replicado em cada caller</div></div>
+      <div class="mod deep"><div class="iface">BackupPaths: cardJson · attachment · index · filename</div><div class="impl">layout + fallbacks num módulo só; callers só conhecem a interface</div></div>
+    </div>
+    <div class="text-sm bg-slate-50 rounded p-3"><strong>Benefits.</strong> <em>Locality:</em> fix once, fixed everywhere — writer e reader nunca mais divergem.
+    <em>Leverage:</em> tests de round-trip (já existe <code class="f">PipefyBackupCardsJsonRoundTripPropertyTest</code>) atravessam a interface real do layout.</div>
+  </section>
+
+  <!-- CANDIDATO 3 -->
+  <section class="bg-white rounded-xl shadow p-6 mb-6">
+    <div class="flex items-center gap-3 mb-2">
+      <h2 class="text-xl font-semibold">3. Lógica de retry duplicada entre console e HTTP</h2>
+      <span class="badge-worth text-xs font-bold px-2 py-1 rounded-full">Worth exploring</span>
+    </div>
+    <p class="text-sm text-slate-500 mb-4">Files: <code class="f">app/Console/Commands/PipefyBackupAllCommand.php::handleRetry</code> · <code class="f">app/Http/Controllers/BackupStatusController.php::retry</code></p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Problem</h3>
+        <p class="text-sm">Resetar um card falho (status, error_message, errors_count, started_at, completed_at) + redespachar
+        <code class="f">BackupCardJob</code> está escrito duas vezes, uma por seam de entrada (console, HTTP). As listas de campos já diferem em detalhe
+        e vão divergir mais. Conhecimento de "o que significa retentar" mora nos callers, não atrás de uma seam.</p>
+      </div>
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Solution</h3>
+        <p class="text-sm">Um módulo de retry com interface única (ex.: <code class="f">retryFailed(batchId): RetryReport</code>);
+        comando e controller viram <strong>adapters</strong> finos de apresentação. O reset de campos e o dispatch vivem atrás da seam.</p>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="mod shallow"><div class="iface">handleRetry() × retry() — reset + dispatch em cada caller</div><div class="impl">listas de campos duplicadas, divergindo</div></div>
+      <div class="mod deep"><div class="iface">retryFailed(batchId): RetryReport</div><div class="impl">reset + dispatch + relatório num módulo; console/HTTP só apresentam</div></div>
+    </div>
+    <div class="text-sm bg-slate-50 rounded p-3"><strong>Benefits.</strong> <em>Locality:</em> regra de retry muda num lugar (os tests <code class="f">Retry*</code> já cobrem o comportamento — atravessariam a seam única).
+    <em>Leverage:</em> terceira entrada futura (ex.: schedule) reusa sem copiar.</div>
+  </section>
+
+  <!-- CANDIDATO 4 -->
+  <section class="bg-white rounded-xl shadow p-6 mb-6">
+    <div class="flex items-center gap-3 mb-2">
+      <h2 class="text-xl font-semibold">4. Agregação de conclusão do batch dentro do job de card</h2>
+      <span class="badge-worth text-xs font-bold px-2 py-1 rounded-full">Worth exploring</span>
+    </div>
+    <p class="text-sm text-slate-500 mb-4">Files: <code class="f">app/Jobs/BackupCardJob.php::aggregatePipeBackupStatus</code> · <code class="f">generateIndexJson</code></p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Problem</h3>
+        <p class="text-sm">Todo <code class="f">BackupCardJob</code> que termina roda ~5 queries de contagem para descobrir se é "o último" e, se for,
+        fecha o batch e gera o <code class="f">index.json</code>. Responsabilidade de nível-batch mora num módulo de nível-card — sem <em>locality</em>
+        (a regra "quando o backup termina" só se entende lendo o job de card) e com condição de corrida implícita entre workers (last-writer-wins sem lock).</p>
+      </div>
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Solution</h3>
+        <p class="text-sm">Mover "tentar concluir o batch" para trás de uma seam própria (ex.: <code class="f">PipeBackup::tryComplete()</code> no model ou módulo dedicado),
+        com a geração do <code class="f">index.json</code> junto. O job de card volta a ter uma interface honesta: processar <strong>um</strong> card.</p>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="mod shallow"><div class="iface">BackupCardJob.handle + aggregate + generateIndex</div><div class="impl">card, batch e índice misturados; N queries por card</div></div>
+      <div class="mod deep"><div class="iface">handle(card) · tryComplete(): bool</div><div class="impl">conclusão e índice atrás da seam do batch</div></div>
+    </div>
+    <div class="text-sm bg-slate-50 rounded p-3"><strong>Benefits.</strong> <em>Locality:</em> a regra de conclusão é testável sem despachar jobs
+    (tests <code class="f">BackupPipeJobStatusTransition*</code> e <code class="f">PipeBackupStatusDerivation*</code> atravessariam a seam).
+    Abre caminho para fechar o batch com lock, sem tocar no job de card.</div>
+  </section>
+
+  <!-- CANDIDATO 5 -->
+  <section class="bg-white rounded-xl shadow p-6 mb-6">
+    <div class="flex items-center gap-3 mb-2">
+      <h2 class="text-xl font-semibold">5. Job de verificação usado como função via `new` + `handle()`</h2>
+      <span class="badge-worth text-xs font-bold px-2 py-1 rounded-full">Worth exploring</span>
+    </div>
+    <p class="text-sm text-slate-500 mb-4">Files: <code class="f">app/Console/Commands/PipefyVerifyBackupCommand.php::verifyPipe</code> · <code class="f">app/Jobs/VerifyCardBackupJob.php</code></p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Problem</h3>
+        <p class="text-sm">O comando instancia o job na mão (<code class="f">new VerifyCardBackupJob(...)</code>) e chama <code class="f">handle()</code> direto —
+        usa a classe de queue como função. A interface que o caller precisa conhecer (ordem dos construtores, shape <code class="f">array{ok, issues}</code>)
+        é a interface de um <strong>adapter</strong> de fila, não a de um módulo de verificação. Se o job ganhar fila de verdade, o comando quebra junto.</p>
+      </div>
+      <div>
+        <h3 class="font-semibold text-sm uppercase text-slate-500 mb-1">Solution</h3>
+        <p class="text-sm">Extrair a verificação para um módulo com interface pequena (ex.: <code class="f">verifyCardBackup(pipeId, cardId, title): VerificationResult</code>);
+        o job e o comando viram dois <strong>adapters</strong> sobre a mesma seam. <strong>Two adapters = real seam</strong> — ela já existe de fato, só não está declarada.</p>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="mod shallow"><div class="iface">new VerifyCardBackupJob(pipe, card, title) → handle(): array</div><div class="impl">caller conhece o adapter de fila</div></div>
+      <div class="mod deep"><div class="iface">verifyCardBackup(...): VerificationResult</div><div class="impl">job e comando como adapters da mesma seam</div></div>
+    </div>
+    <div class="text-sm bg-slate-50 rounded p-3"><strong>Benefits.</strong> <em>Locality:</em> regra de integridade num lugar, testável sem construir job
+    (tests <code class="f">VerifyCardBackup*</code> já existem e migrariam para a seam). <em>Leverage:</em> verificação reutilizável pós-backup automático.</div>
+  </section>
+
+  <section class="bg-emerald-50 border border-emerald-200 rounded-xl shadow p-6">
+    <h2 class="text-xl font-semibold mb-2">Top recommendation</h2>
+    <p class="text-sm"><strong>Candidato 1 (travessia de cards)</strong> primeiro: é o deepening mais barato (um método privado + um adapter fino),
+    elimina a duplicação verbatim mais perigosa (query GraphQL ×2) e — o principal — <strong>alinha a superfície de teste com a seam de produção</strong>,
+    que hoje estão em métodos diferentes. Em seguida o <strong>2 (layout)</strong>, que dá <em>locality</em> a todos os readers/writers e protege o par writer↔verifier.</p>
+  </section>
+
+</div>
+</body>
+</html>
