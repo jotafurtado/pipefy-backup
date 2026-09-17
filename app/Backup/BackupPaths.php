@@ -9,12 +9,8 @@ class BackupPaths
         return "pipefy-backup/{$pipeId}/cards/{$cardId}.json";
     }
 
-    public static function attachment(int $pipeId, int $cardId, string $filename, ?string $pathUuid = null): string
+    public static function attachment(int $pipeId, int $cardId, string $filename, string $pathUuid): string
     {
-        if ($pathUuid === null) {
-            return "pipefy-backup/{$pipeId}/attachments/{$cardId}/{$filename}";
-        }
-
         return "pipefy-backup/{$pipeId}/attachments/{$cardId}/{$pathUuid}/{$filename}";
     }
 

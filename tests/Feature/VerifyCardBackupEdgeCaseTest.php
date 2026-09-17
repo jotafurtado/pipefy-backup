@@ -42,11 +42,13 @@ test('verify fails when card json is empty object', function () {
 test('verify fails when attachment is missing', function () {
     Storage::fake('local');
 
+    $uuid = 'e4adb580-95f1-469f-bffc-f28a1767e07e';
+
     $cardData = [
         'id' => '99999',
         'title' => 'Card com Attachment',
         'attachments' => [
-            ['filename' => 'doc.pdf', 'url' => 'https://example.com/doc.pdf', 'path' => '/uploads/doc.pdf'],
+            ['filename' => 'doc.pdf', 'url' => 'https://example.com/doc.pdf', 'path' => "uploads/{$uuid}/doc.pdf"],
         ],
     ];
 
@@ -75,11 +77,12 @@ test('command succeeds with valid complete backup', function () {
     Storage::fake('local');
 
     $pipeId = 12345;
+    $uuid = 'e4adb580-95f1-469f-bffc-f28a1767e07e';
     $cardData = [
         'id' => '100',
         'title' => 'Card OK',
         'attachments' => [
-            ['filename' => 'file.pdf', 'url' => 'https://example.com/file.pdf', 'path' => '/uploads/file.pdf'],
+            ['filename' => 'file.pdf', 'url' => 'https://example.com/file.pdf', 'path' => "uploads/{$uuid}/file.pdf"],
         ],
     ];
 
@@ -94,7 +97,7 @@ test('command succeeds with valid complete backup', function () {
     );
 
     Storage::disk('local')->put(
-        "pipefy-backup/{$pipeId}/attachments/100/file.pdf",
+        "pipefy-backup/{$pipeId}/attachments/100/{$uuid}/file.pdf",
         'content',
     );
 

@@ -37,7 +37,7 @@ test('attachment with pathUuid returns nested path', function () {
         ->toBe('pipefy-backup/1000172/attachments/36460290/e4adb580-95f1-469f-bffc-f28a1767e07e/file.png');
 });
 
-test('attachment without pathUuid returns flat legacy path', function () {
-    expect(BackupPaths::attachment(1000172, 36460290, 'file.png'))
-        ->toBe('pipefy-backup/1000172/attachments/36460290/file.png');
+test('attachment requires pathUuid', function () {
+    expect(fn () => BackupPaths::attachment(1000172, 36460290, 'file.png'))
+        ->toThrow(TypeError::class);
 });

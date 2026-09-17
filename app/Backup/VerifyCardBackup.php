@@ -34,12 +34,26 @@ class VerifyCardBackup
 
         foreach ($attachments as $attachment) {
             $filename = BackupPaths::attachmentFilename($attachment);
-            $attachmentPath = BackupPaths::attachment($pipeId, $cardId, $filename);
+            $pathUuid = BackupPaths::attachmentPathUuid($attachment);
+            $attachmentPath = BackupPaths::attachment($pipeId, $cardId, $filename, $pathUuid);
 
             if (! Storage::disk('local')->exists($attachmentPath)) {
                 $msg = "Verificação: Attachment ausente - pipe:{$pipeId} card:{$cardId} file:{$filename}";
                 Log::warning($msg);
                 $issues[] = $msg;
+
+                continue;
+            }
+
+            if (array_key_exists('content_length', $attachment)) {
+                $expectedSize = (int) $attachment['content_length'];
+                $actualSize = (int) filesize(Storage::disk('local')->path($attachmentPath));
+
+                if ($actualSize !== $expectedSize) {
+                    $msg = "Verificação: Attachment tamanho divergente - pipe:{$pipeId} card:{$cardId} file:{$filename} esperado:{$expectedSize} atual:{$actualSize}";
+                    Log::warning($msg);
+                    $issues[] = $msg;
+                }
             }
         }
 

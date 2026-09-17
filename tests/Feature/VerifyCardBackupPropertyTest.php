@@ -3,6 +3,7 @@
 use App\Backup\VerifyCardBackup;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
 
@@ -20,12 +21,17 @@ test('verification detects json and attachments correctly', function () {
 
         $attachmentCount = fake()->numberBetween(0, 3);
         $attachments = [];
+        $attachmentUuids = [];
 
         for ($a = 0; $a < $attachmentCount; $a++) {
+            $filename = fake()->unique()->word().'.'.fake()->fileExtension();
+            $uuid = Str::uuid()->toString();
+            $attachmentUuids[$filename] = $uuid;
+
             $attachments[] = [
-                'filename' => fake()->unique()->word().'.'.fake()->fileExtension(),
+                'filename' => $filename,
                 'url' => fake()->url(),
-                'path' => '/uploads/'.fake()->word(),
+                'path' => "uploads/{$uuid}/{$filename}",
                 'createdAt' => fake()->dateTimeThisYear()->format('Y-m-d\TH:i:s'),
             ];
         }
@@ -68,8 +74,10 @@ test('verification detects json and attachments correctly', function () {
 
         if ($scenario === 'valid_complete') {
             foreach ($attachments as $att) {
+                $uuid = $attachmentUuids[$att['filename']];
+
                 Storage::disk('local')->put(
-                    "pipefy-backup/{$pipeId}/attachments/{$cardId}/{$att['filename']}",
+                    "pipefy-backup/{$pipeId}/attachments/{$cardId}/{$uuid}/{$att['filename']}",
                     'file-content',
                 );
             }
@@ -86,8 +94,10 @@ test('verification detects json and attachments correctly', function () {
                     if ($idx === $skipIndex) {
                         continue;
                     }
+                    $uuid = $attachmentUuids[$att['filename']];
+
                     Storage::disk('local')->put(
-                        "pipefy-backup/{$pipeId}/attachments/{$cardId}/{$att['filename']}",
+                        "pipefy-backup/{$pipeId}/attachments/{$cardId}/{$uuid}/{$att['filename']}",
                         'file-content',
                     );
                 }
