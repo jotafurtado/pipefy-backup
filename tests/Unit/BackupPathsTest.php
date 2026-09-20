@@ -41,3 +41,12 @@ test('attachment requires pathUuid', function () {
     expect(fn () => BackupPaths::attachment(1000172, 36460290, 'file.png'))
         ->toThrow(TypeError::class);
 });
+
+test('attachmentFilename strips unicode control and formatting characters', function () {
+    $attachment = [
+        'filename' => "kyoScan-\u{200e}10\u{200e}.\u{200e}22\u{200e}.\u{200e}2020-\u{200e}16\u{200e}.\u{200e}47\u{200e}.\u{200e}06.pdf",
+    ];
+
+    expect(BackupPaths::attachmentFilename($attachment))
+        ->toBe('kyoScan-10.22.2020-16.47.06.pdf');
+});

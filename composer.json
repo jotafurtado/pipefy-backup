@@ -1,14 +1,16 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/laravel",
+    "name": "jotafurtado/pipefy-backup",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
-    "keywords": ["laravel", "framework"],
+    "description": "Solução completa e automatizada para backup de pipes, cards e anexos do Pipefy com sincronização para S3 e dashboard de monitoramento.",
+    "keywords": ["pipefy", "backup", "laravel", "s3", "archive", "graphql"],
     "license": "MIT",
     "require": {
-        "php": "^8.2",
-        "laravel/framework": "^12.0",
-        "laravel/tinker": "^2.10.1"
+        "php": "^8.3",
+        "laravel/framework": "^13.0",
+        "laravel/pulse": "^1.8",
+        "laravel/tinker": "^3.0",
+        "predis/predis": "^3.6"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
@@ -18,9 +20,9 @@
         "laravel/sail": "^1.41",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.6",
-        "pestphp/pest": "^3.8",
-        "pestphp/pest-plugin-drift": "^3.0",
-        "phpunit/phpunit": "^11.5.3"
+        "pestphp/pest": "^4.0",
+        "pestphp/pest-plugin-drift": "^4.0",
+        "phpunit/phpunit": "^12.0"
     },
     "autoload": {
         "psr-4": {
@@ -45,11 +47,23 @@
         ],
         "dev-windows": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#c4b5fd,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --timeout=0\" \"npm run dev\" --names=server,queue,vite --kill-others"
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#a78bfa,#818cf8,#6366f1,#fdba74\" \"php artisan serve\" \"worker-loop.bat queue-1\" \"worker-loop.bat queue-2\" \"worker-loop.bat queue-3\" \"worker-loop.bat queue-4\" \"php artisan pulse:work\" --names=server,q1,q2,q3,q4,pulse --kill-others"
+        ],
+        "dev-linux": [
+            "Composer\\Config::disableProcessTimeout",
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#a78bfa,#818cf8,#6366f1,#fdba74\" \"php artisan serve\" \"./worker-loop.sh queue-1\" \"./worker-loop.sh queue-2\" \"./worker-loop.sh queue-3\" \"./worker-loop.sh queue-4\" \"php artisan pulse:work\" --names=server,q1,q2,q3,q4,pulse --kill-others"
+        ],
+        "dev-windows:8w": [
+            "Composer\\Config::disableProcessTimeout",
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#a78bfa,#818cf8,#6366f1,#4f46e5,#4338ca,#3730a3,#fdba74,#a3e635\" \"php artisan serve\" \"worker-loop.bat queue-1\" \"worker-loop.bat queue-2\" \"worker-loop.bat queue-3\" \"worker-loop.bat queue-4\" \"worker-loop.bat queue-5\" \"worker-loop.bat queue-6\" \"worker-loop.bat queue-7\" \"worker-loop.bat queue-8\" \"php artisan pulse:work\" --names=server,q1,q2,q3,q4,q5,q6,q7,q8,pulse --kill-others"
+        ],
+        "dev-windows:vite": [
+            "Composer\\Config::disableProcessTimeout",
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#a78bfa,#818cf8,#6366f1,#4f46e5,#4338ca,#3730a3,#fdba74,#a3e635,#f43f5e\" \"php artisan serve\" \"worker-loop.bat queue-1\" \"worker-loop.bat queue-2\" \"worker-loop.bat queue-3\" \"worker-loop.bat queue-4\" \"worker-loop.bat queue-5\" \"worker-loop.bat queue-6\" \"worker-loop.bat queue-7\" \"worker-loop.bat queue-8\" \"php artisan pulse:work\" \"npm run dev\" --names=server,q1,q2,q3,q4,q5,q6,q7,q8,pulse,vite --kill-others"
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --timeout=0\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,logs,vite --kill-others"
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#a78bfa,#818cf8,#6366f1,#4f46e5,#4338ca,#3730a3,#fb7185,#fdba74,#a3e635\" \"php artisan serve\" \"worker-loop.bat queue-1\" \"worker-loop.bat queue-2\" \"worker-loop.bat queue-3\" \"worker-loop.bat queue-4\" \"worker-loop.bat queue-5\" \"worker-loop.bat queue-6\" \"worker-loop.bat queue-7\" \"worker-loop.bat queue-8\" \"php artisan pail --timeout=0\" \"php artisan pulse:work\" \"npm run dev\" --names=server,q1,q2,q3,q4,q5,q6,q7,q8,logs,pulse,vite --kill-others"
         ],
         "test": [
             "@php artisan config:clear --ansi",

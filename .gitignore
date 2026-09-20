@@ -28,3 +28,20 @@ Thumbs.db
 *.sqlite-journal
 npm-debug.log
 yarn-error.log
+
+# Storage & Backups
+/storage/app/private/*
+!/storage/app/private/.gitignore
+/storage/app/public/*
+!/storage/app/public/.gitignore
+/storage/framework/cache/*
+!/storage/framework/cache/.gitignore
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitignore
+/storage/framework/views/*
+!/storage/framework/views/.gitignore
+/storage/logs/*
+!/storage/logs/.gitignore
+pipefy-backup/
+*.tmp
+

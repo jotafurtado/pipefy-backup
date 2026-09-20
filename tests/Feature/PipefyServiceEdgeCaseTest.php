@@ -107,3 +107,37 @@ test('get card attachments throws pipefy api exception on connection error', fun
 
     makeService()->getCardAttachments(cardId: 12345);
 })->throws(PipefyApiException::class, 'Falha ao conectar com a API do Pipefy');
+
+test('query refreshes token and retries on 401 response', function () {
+    fakeOauthToken();
+
+    $tokenRequests = 0;
+    $queryRequests = 0;
+
+    Http::fake(function ($request) use (&$tokenRequests, &$queryRequests) {
+        if (str_contains($request->url(), 'oauth/token')) {
+            $tokenRequests++;
+
+            return Http::response(['access_token' => 'token-'.$tokenRequests, 'expires_in' => 3600]);
+        }
+
+        $queryRequests++;
+        if ($queryRequests === 1) {
+            return Http::response(['message' => 'The login information is not valid'], 401);
+        }
+
+        return Http::response([
+            'data' => [
+                'card' => [
+                    'attachments' => [],
+                ],
+            ],
+        ], 200);
+    });
+
+    $result = makeService()->getCardAttachments(cardId: 12345);
+
+    expect($result)->toBeArray()->toBeEmpty();
+    expect($tokenRequests)->toBe(2);
+    expect($queryRequests)->toBe(2);
+});

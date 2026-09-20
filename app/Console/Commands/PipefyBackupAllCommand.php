@@ -11,12 +11,16 @@ use Illuminate\Support\Str;
 
 class PipefyBackupAllCommand extends Command
 {
-    protected $signature = 'pipefy:backup-all {--retry : Reprocessar pipes com falha do último batch}';
+    protected $signature = 'pipefy:backup-all {--retry : Reprocessar cards com falha total do último batch} {--retry-errored : Reprocessar cards com erros parciais de anexos do último batch}';
 
     protected $description = 'Faz backup de todos os pipes da organização no Pipefy';
 
     public function handle(PipefyService $pipefy, RetryFailedCards $retryFailedCards): int
     {
+        if ($this->option('retry-errored')) {
+            return $this->handleRetryErrored($retryFailedCards);
+        }
+
         if ($this->option('retry')) {
             return $this->handleRetry($retryFailedCards);
         }
@@ -100,6 +104,35 @@ class PipefyBackupAllCommand extends Command
 
         $this->table(['Pipe ID', 'Pipe', 'Card ID', 'Card'], $rows);
         $this->info("Total de cards redespachados: {$report->count}");
+
+        return self::SUCCESS;
+    }
+
+    private function handleRetryErrored(RetryFailedCards $retryFailedCards): int
+    {
+        $batchId = PipeBackup::latest()->value('batch_id');
+
+        if (! $batchId) {
+            $this->info('Nenhum batch encontrado.');
+
+            return self::SUCCESS;
+        }
+
+        $report = $retryFailedCards->retryErroredCards($batchId);
+
+        if ($report->isEmpty()) {
+            $this->info('Nenhum card com erro parcial para reprocessar.');
+
+            return self::SUCCESS;
+        }
+
+        $rows = array_map(
+            fn ($item) => [$item->pipeId, $item->pipeName, $item->cardId, $item->cardTitle],
+            $report->items,
+        );
+
+        $this->table(['Pipe ID', 'Pipe', 'Card ID', 'Card'], $rows);
+        $this->info("Total de cards com erros redespachados: {$report->count}");
 
         return self::SUCCESS;
     }

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Backup\BackupPaths;
 use App\Exceptions\PipefyApiException;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
@@ -26,12 +27,27 @@ class PipefyService
     private function getAccessToken(): string
     {
         return Cache::remember('pipefy_access_token', 3500, function () {
+            $delays = app()->runningUnitTests() ? [0, 0, 0] : [1000, 2000, 5000];
+
             try {
-                $response = Http::asForm()->post($this->tokenUrl, [
-                    'grant_type' => 'client_credentials',
-                    'client_id' => $this->clientId,
-                    'client_secret' => $this->clientSecret,
-                ]);
+                $response = Http::asForm()
+                    ->connectTimeout(30)
+                    ->timeout(60)
+                    ->retry($delays, 0, function (\Throwable $exception) {
+                        if ($exception instanceof ConnectionException) {
+                            return true;
+                        }
+                        if ($exception instanceof RequestException) {
+                            return $exception->response->status() === 429 || $exception->response->serverError();
+                        }
+
+                        return false;
+                    })
+                    ->post($this->tokenUrl, [
+                        'grant_type' => 'client_credentials',
+                        'client_id' => $this->clientId,
+                        'client_secret' => $this->clientSecret,
+                    ]);
             } catch (ConnectionException $e) {
                 throw PipefyApiException::connectionError($e->getMessage());
             }
@@ -60,39 +76,74 @@ class PipefyService
      */
     public function query(string $query, array $variables = []): array
     {
-        $token = $this->getAccessToken();
-
         $payload = ['query' => $query];
 
         if (! empty($variables)) {
             $payload['variables'] = $variables;
         }
 
-        try {
-            $response = Http::withToken($token)
-                ->acceptJson()
-                ->timeout(120)
-                ->post($this->endpoint, $payload);
-        } catch (ConnectionException $e) {
-            throw PipefyApiException::connectionError($e->getMessage());
+        $delays = app()->runningUnitTests() ? [0, 0, 0] : [1000, 3000, 8000];
+
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $token = $this->getAccessToken();
+
+            try {
+                $response = Http::withToken($token)
+                    ->acceptJson()
+                    ->connectTimeout(30)
+                    ->timeout(120)
+                    ->retry($delays, 0, function (\Throwable $exception) {
+                        if ($exception instanceof ConnectionException) {
+                            return true;
+                        }
+                        if ($exception instanceof RequestException) {
+                            $status = $exception->response->status();
+                            if ($status === 429) {
+                                $retryAfter = (int) $exception->response->header('Retry-After');
+                                $sleepSeconds = $retryAfter > 0 ? min($retryAfter, 60) : 5;
+                                if (! app()->runningUnitTests()) {
+                                    sleep($sleepSeconds);
+                                }
+
+                                return true;
+                            }
+
+                            return $exception->response->serverError();
+                        }
+
+                        return false;
+                    }, throw: false)
+                    ->post($this->endpoint, $payload);
+            } catch (ConnectionException $e) {
+                throw PipefyApiException::connectionError($e->getMessage());
+            }
+
+            // Se o token estiver expirado ou inválido (401), limpa o cache e tenta novo token na 2ª tentativa
+            if ($response->status() === 401 && $attempt === 1) {
+                Cache::forget('pipefy_access_token');
+
+                continue;
+            }
+
+            if ($response->status() !== 200) {
+                throw PipefyApiException::httpError($response->status(), $response->body());
+            }
+
+            $body = $response->body();
+            $data = json_decode($body, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw PipefyApiException::invalidResponse('falha ao decodificar JSON');
+            }
+
+            if (isset($data['errors'])) {
+                throw PipefyApiException::graphqlErrors($data['errors']);
+            }
+
+            return $data['data'];
         }
 
-        if ($response->status() !== 200) {
-            throw PipefyApiException::httpError($response->status(), $response->body());
-        }
-
-        $body = $response->body();
-        $data = json_decode($body, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw PipefyApiException::invalidResponse('falha ao decodificar JSON');
-        }
-
-        if (isset($data['errors'])) {
-            throw PipefyApiException::graphqlErrors($data['errors']);
-        }
-
-        return $data['data'];
+        throw PipefyApiException::oauthError('Não foi possível autenticar após renovação do token');
     }
 
     /**

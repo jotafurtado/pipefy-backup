@@ -8,6 +8,8 @@ use App\Models\PipeBackupError;
 use App\Services\PipefyService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -158,34 +160,115 @@ class BackupCardJob implements ShouldQueue
             mkdir($directory, 0755, true);
         }
 
-        $contentLength = (int) Http::head($attachment['url'])->header('Content-Length');
-
-        if ($contentLength > 0
-            && Storage::disk('local')->exists($storagePath)
-            && is_file($fullPath)
-            && filesize($fullPath) === $contentLength
-        ) {
-            $this->persistContentLength($attachment, $contentLength);
-
-            return;
-        }
-
+        $fileExists = Storage::disk('local')->exists($storagePath) && is_file($fullPath);
         $legacyPath = "pipefy-backup/{$this->pipeId}/attachments/{$cardId}/{$filename}";
+        $legacyExists = ! $forceDownload && Storage::disk('local')->exists($legacyPath);
 
-        if (! $forceDownload && Storage::disk('local')->exists($legacyPath)) {
-            $legacyFull = Storage::disk('local')->path($legacyPath);
+        $contentLength = 0;
 
-            if (@rename($legacyFull, $fullPath)) {
+        // Se o arquivo já existe no destino ou no path legado, consulta HEAD para checar integridade do tamanho.
+        // Se o arquivo NÃO existe, pula o HEAD para economizar 50% das requisições contra o storage do Pipefy.
+        if ($fileExists || $legacyExists) {
+            $contentLength = $this->fetchContentLength($attachment['url']);
+
+            if ($contentLength > 0 && $fileExists && filesize($fullPath) === $contentLength) {
                 $this->persistContentLength($attachment, $contentLength);
 
                 return;
             }
+
+            if ($contentLength > 0 && $legacyExists) {
+                $legacyFull = Storage::disk('local')->path($legacyPath);
+
+                if (@rename($legacyFull, $fullPath)) {
+                    $this->persistContentLength($attachment, $contentLength);
+
+                    return;
+                }
+            }
         }
 
-        $response = Http::withOptions(['sink' => $fullPath])->get($attachment['url']);
+        $this->performDownload($attachment, $fullPath, $contentLength);
+    }
 
-        if ($response->failed()) {
-            throw new \RuntimeException("Download falhou: HTTP {$response->status()}");
+    private function fetchContentLength(string $url): int
+    {
+        $delays = app()->runningUnitTests() ? [0, 0] : [500, 1000];
+
+        try {
+            $response = Http::connectTimeout(15)
+                ->timeout(30)
+                ->retry($delays, 0, function (\Throwable $exception) {
+                    if ($exception instanceof ConnectionException) {
+                        return true;
+                    }
+                    if ($exception instanceof RequestException) {
+                        $status = $exception->response->status();
+
+                        return $status === 429 || $exception->response->serverError();
+                    }
+
+                    return false;
+                })
+                ->head($url);
+
+            if ($response->successful()) {
+                return (int) $response->header('Content-Length');
+            }
+        } catch (\Throwable) {
+            // Falhas transitórias no HEAD não devem bloquear o download via GET
+        }
+
+        return 0;
+    }
+
+    private function performDownload(array $attachment, string $fullPath, int $contentLength): void
+    {
+        $tempPath = $fullPath.'.tmp';
+        $delays = app()->runningUnitTests() ? [0, 0, 0] : [1000, 2000, 5000];
+
+        try {
+            $response = Http::connectTimeout(20)
+                ->timeout(180)
+                ->retry($delays, 0, function (\Throwable $exception) {
+                    if ($exception instanceof ConnectionException) {
+                        return true;
+                    }
+                    if ($exception instanceof RequestException) {
+                        $status = $exception->response->status();
+
+                        return $status === 429 || $exception->response->serverError();
+                    }
+
+                    return false;
+                })
+                ->withOptions(['sink' => $tempPath])
+                ->get($attachment['url']);
+
+            if ($response->failed()) {
+                if (file_exists($tempPath)) {
+                    @unlink($tempPath);
+                }
+
+                throw new \RuntimeException("Download falhou: HTTP {$response->status()}");
+            }
+
+            if (file_exists($tempPath)) {
+                rename($tempPath, $fullPath);
+            }
+        } catch (\Throwable $e) {
+            if (file_exists($tempPath)) {
+                @unlink($tempPath);
+            }
+
+            throw $e;
+        }
+
+        if ($contentLength <= 0) {
+            $contentLength = (int) $response->header('Content-Length');
+            if ($contentLength <= 0 && is_file($fullPath)) {
+                $contentLength = (int) filesize($fullPath);
+            }
         }
 
         $this->persistContentLength($attachment, $contentLength);
