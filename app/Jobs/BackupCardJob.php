@@ -161,7 +161,7 @@ class BackupCardJob implements ShouldQueue
         }
 
         $fileExists = Storage::disk('local')->exists($storagePath) && is_file($fullPath);
-        $legacyPath = "pipefy-backup/{$this->pipeId}/attachments/{$cardId}/{$filename}";
+        $legacyPath = BackupPaths::legacyAttachment($this->pipeId, $cardId, $filename);
         $legacyExists = ! $forceDownload && Storage::disk('local')->exists($legacyPath);
 
         $contentLength = 0;

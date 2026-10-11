@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Backup\BackupPaths;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
@@ -16,7 +17,7 @@ class CleanupAttachmentsCommand extends Command
     public function handle(): int
     {
         $disk = Storage::disk('local');
-        $basePath = 'pipefy-backup';
+        $basePath = BackupPaths::root();
 
         if (! $disk->exists($basePath)) {
             $this->info('Nenhum backup encontrado em disco.');
@@ -65,7 +66,7 @@ class CleanupAttachmentsCommand extends Command
         $pipeDirs = $disk->directories($basePath);
 
         foreach ($pipeDirs as $pipeDir) {
-            $attachmentsDir = rtrim($pipeDir, '/').'/attachments';
+            $attachmentsDir = BackupPaths::attachmentsDirectory(basename($pipeDir));
 
             if (! $disk->exists($attachmentsDir)) {
                 continue;

@@ -4,14 +4,34 @@ namespace App\Backup;
 
 class BackupPaths
 {
+    public static function root(): string
+    {
+        return 'pipefy-backup';
+    }
+
+    public static function pipe(int|string $pipeId): string
+    {
+        return self::root()."/{$pipeId}";
+    }
+
+    public static function attachmentsDirectory(int|string $pipeId): string
+    {
+        return self::pipe($pipeId).'/attachments';
+    }
+
+    public static function legacyAttachment(int $pipeId, int $cardId, string $filename): string
+    {
+        return self::attachmentsDirectory($pipeId)."/{$cardId}/{$filename}";
+    }
+
     public static function cardJson(int $pipeId, int $cardId): string
     {
-        return "pipefy-backup/{$pipeId}/cards/{$cardId}.json";
+        return self::pipe($pipeId)."/cards/{$cardId}.json";
     }
 
     public static function attachment(int $pipeId, int $cardId, string $filename, string $pathUuid): string
     {
-        return "pipefy-backup/{$pipeId}/attachments/{$cardId}/{$pathUuid}/{$filename}";
+        return self::attachmentsDirectory($pipeId)."/{$cardId}/{$pathUuid}/{$filename}";
     }
 
     /**
@@ -48,7 +68,7 @@ class BackupPaths
 
     public static function index(int $pipeId): string
     {
-        return "pipefy-backup/{$pipeId}/cards/index.json";
+        return self::pipe($pipeId).'/cards/index.json';
     }
 
     /**

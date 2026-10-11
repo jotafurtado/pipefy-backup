@@ -32,7 +32,7 @@ class PipefyVerifyBackupCommand extends Command
 
     private function verifyAll(): int
     {
-        $basePath = 'pipefy-backup';
+        $basePath = BackupPaths::root();
 
         if (! Storage::disk('local')->exists($basePath)) {
             $this->error('Nenhum diretório de backup encontrado.');
