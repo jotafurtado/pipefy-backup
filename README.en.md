@@ -1,7 +1,7 @@
 # Pipefy Backup
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![PHP](https://img.shields.io/badge/PHP-8.3%20%7C%208.4-777bb4.svg?logo=php)](https://www.php.net/)
+[![PHP](https://img.shields.io/badge/PHP-8.4.1%2B-777bb4.svg?logo=php)](https://www.php.net/)
 [![Laravel](https://img.shields.io/badge/Laravel-13.x-ff2d20.svg?logo=laravel)](https://laravel.com)
 [![Tests](https://img.shields.io/badge/tests-73%20passed-brightgreen.svg)](#testing)
 
@@ -45,9 +45,9 @@ storage/app/private/pipefy-backup/
 
 ## Prerequisites
 
-- **PHP**: 8.3 or 8.4 (extensions: `bcmath`, `curl`, `mbstring`, `openssl`, `pdo_sqlite` or `pdo_mysql`, `fileinfo`)
+- **PHP**: 8.4.1+ to install the locked dependencies, including development tools (extensions: `bcmath`, `curl`, `mbstring`, `openssl`, `pdo_sqlite` or `pdo_mysql`, `fileinfo`)
 - **Composer**: 2.x
-- **Node.js**: 18+ and `npm`
+- **Node.js**: 20.x starting at 20.19, or 22.12+ and `npm`
 - **Redis** *(strongly recommended for large organizations with 10k+ attachments)* or SQLite / MySQL database queue
 - **Pipefy Account** with administrative access to generate API credentials
 - **AWS CLI** *(optional, if syncing to S3)*
@@ -185,8 +185,8 @@ php artisan pipefy:backup-all --retry
 |---|---|
 | `php artisan pipefy:pipes` | Lists all pipes available in the configured Pipefy organization. |
 | `php artisan pipefy:backup-status` | Displays summary of backups (card counts, completion state, errors). |
-| `php artisan pipefy:verify-backup` | Verifies on-disk files against JSON manifests and checks file sizes. |
-| `php artisan pipefy:verify-backup --pipe={id}` | Verifies integrity for a single specific pipe. |
+| `php artisan pipefy:verify-backup --all` | Verifies on-disk files against JSON manifests and checks file sizes. |
+| `php artisan pipefy:verify-backup {id}` | Verifies integrity for a single specific pipe. |
 | `php artisan pipefy:cleanup-attachments --dry-run` | Identifies orphaned legacy attachment files. |
 | `php artisan pipefy:cleanup-attachments` | Removes orphaned legacy attachment files after migration. |
 
@@ -230,6 +230,24 @@ cat storage/app/private/pipefy-backup/123456/cards/index.json | jq '.cards[] | {
 # View attachments of a card
 cat storage/app/private/pipefy-backup/123456/cards/789012.json | jq '.attachments[] | {filename, path, content_length}'
 ```
+
+---
+
+## Backup modules
+
+Commands, HTTP endpoints and jobs reuse the same modules:
+
+| Module | Responsibility |
+|---|---|
+| `PipefyService::eachCardPage()` | Paginated card traversal with one GraphQL document, without accumulating the entire pipe in memory. |
+| `BackupPaths` | Card, index, current and legacy attachment paths, discovery directories and filenames. |
+| `RetryFailedCards` | Reset and redispatch of failed or partially errored cards, returning a report for CLI and HTTP. |
+| `PipeBackup::recalculateStatus()` | Counts, Pipe Backup completion and `index.json` generation when no cards are pending or processing. |
+| `VerifyCardBackup` | JSON verification, attachment existence and size verification when `content_length` is available. |
+
+A Batch groups multiple Pipe Backups. Completion is calculated per pipe. Empty pipes are completed by the listing job without generating an index. The HTTP endpoint handles retries of pipes whose listing failed; CLI retry options operate on cards.
+
+Legacy files are migrated during attachment download. Use `pipefy:cleanup-attachments --dry-run` to inspect orphan files before removal. Tests exercise the modules through their public interfaces and the CLI and HTTP adapters.
 
 ---
 
